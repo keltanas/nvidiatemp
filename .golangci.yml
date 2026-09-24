@@ -1,0 +1,23 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck # unchecked errors
+    - govet # suspicious constructs
+    - ineffassign # ineffective assignments
+    - staticcheck # correctness and simplification (SA/S/ST/QF)
+    - unused # unused code
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        - fmt.Fprintf
+
+formatters:
+  enable:
+    - gofmt

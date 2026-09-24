@@ -1,0 +1,47 @@
+# nvidiatemp configuration file — install as /etc/nvidiatemp.yaml
+# (or pass another path with -c). Every field is optional: missing fields
+# take the built-in defaults shown in the comments.
+
+# Polling interval for temperature/power reads. Go duration ("2s", "1m30s")
+# or a number of seconds. Default: 2s.
+poll_interval: 2s
+
+# Dead zone, %: the fan speed is written only when |target − current| is at
+# least this much. Default: 5.
+deadband: 5
+
+# Pause between writes to the same GPU. Go duration or seconds. Also damps
+# mode-switch flapping (any write — mode or speed — updates it). Default: 5s.
+write_pause: 5s
+
+# Power threshold, W: above this draw the GPU is taken into manual mode.
+# Return to auto happens only when power is below it AND temperature is
+# below the lower bound of the curve. Must be positive. Default: 50.
+power_threshold: 50
+
+# Auto-cooldown: after the return conditions first hold, the fan is held at
+# its minimum speed (30%) for this long before switching to auto mode. If
+# load returns in the meantime (power above the threshold or temperature
+# above the curve's lower bound) the cooldown is cancelled and control
+# follows the curve again. Go duration or seconds. Default: 5m.
+auto_delay: 5m
+
+# Common curve «temperature (°C) → fan speed (%)». Temperatures must strictly
+# increase; speeds must be within [30, 100] — the card's hardware minimum in
+# manual mode is 30%. Below the first point the first speed applies, above
+# the last point the last one. Default: the list below.
+curve:
+  - { temp: 50, speed: 30 }
+  - { temp: 60, speed: 40 }
+  - { temp: 65, speed: 45 }
+  - { temp: 70, speed: 55 }
+  - { temp: 75, speed: 60 }
+  - { temp: 80, speed: 70 }
+
+# Optional per-GPU-index curve overrides (key = the index nvidia-smi reports).
+# GPUs without an override use the common curve.
+# gpu_curves:
+#   1:
+#     - { temp: 55, speed: 35 }
+#     - { temp: 70, speed: 60 }
+#     - { temp: 85, speed: 80 }

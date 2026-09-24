@@ -1,0 +1,6 @@
+# Agent tooling metadata (not part of the project)
+.agents/
+
+# Built binaries
+/nvidiatemp
+nvidiatemp-linux

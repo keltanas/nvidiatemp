@@ -1,0 +1,20 @@
+[Unit]
+Description=nvidiatemp — NVIDIA GPU fan controller daemon
+Documentation=file:///usr/share/doc/nvidiatemp/README.md
+# Wait for the display manager so DISPLAY=:0 is available for nvidia-settings.
+After=network.target display-manager.service
+
+[Service]
+Type=simple
+# Runs as root by default: no sudo needed, and the config file at
+# /etc/nvidiatemp.yaml is readable.
+ExecStart=/usr/local/bin/nvidiatemp run
+Environment=DISPLAY=:0
+# If root cannot access the X display (XAUTHORITY errors in the journal),
+# point this at the user's X authority file, e.g.:
+# Environment=XAUTHORITY=/home/<user>/.Xauthority
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
