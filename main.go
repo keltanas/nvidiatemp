@@ -53,6 +53,7 @@ Flags:
   run    -c PATH  configuration file (default /etc/nvidiatemp.yaml)
          -v       verbose: log every tick (debug level)
   status -c PATH  configuration file (default /etc/nvidiatemp.yaml)
+  set    -c PATH  configuration file (default /etc/nvidiatemp.yaml)
   curve  -c PATH  configuration file (default /etc/nvidiatemp.yaml)
 `)
 }

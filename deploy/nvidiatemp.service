@@ -1,17 +1,19 @@
 [Unit]
 Description=nvidiatemp — NVIDIA GPU fan controller daemon
 Documentation=file:///usr/share/doc/nvidiatemp/README.md
-# Wait for the display manager so DISPLAY=:0 is available for nvidia-settings.
+# Only needed for the nvidia-settings backend (X display); NVML — the default
+# backend — talks to the driver directly and needs no display manager.
 After=network.target display-manager.service
 
 [Service]
 Type=simple
-# Runs as root by default: no sudo needed, and the config file at
+# Runs as root by default: NVML fan writes need root and the config file at
 # /etc/nvidiatemp.yaml is readable.
 ExecStart=/usr/local/bin/nvidiatemp run
-Environment=DISPLAY=:0
-# If root cannot access the X display (XAUTHORITY errors in the journal),
-# point this at the user's X authority file, e.g.:
+# The nvidia-settings backend needs an X display. With the default backend
+# (NVML) these are unnecessary; uncomment and set XAUTHORITY if you switch
+# `backend: nvidia-settings` and the journal reports display errors.
+# Environment=DISPLAY=:0
 # Environment=XAUTHORITY=/home/<user>/.Xauthority
 Restart=on-failure
 RestartSec=5

@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    # The NVML backend uses cgo (github.com/NVIDIA/go-nvml); libnvidia-ml is
+    # loaded at runtime, so no driver is needed to build or test.
+    env:
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -18,6 +22,8 @@ jobs:
 
   lint:
     runs-on: ubuntu-24.04
+    env:
+      CGO_ENABLED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: golangci/golangci-lint-action@v9

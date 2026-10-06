@@ -22,16 +22,21 @@ driver when idle.
 - Anti-flapping: a speed is written only when it differs from the current one
   by at least the deadband (default 5%) and no more often than once per
   `write_pause` (default 5s); mode switches are subject to the same pause.
+- Fan control goes through NVML by default (`backend: auto`), so no X display
+  and no sudo wrapper are involved, and every fan of a GPU is addressed
+  explicitly. `nvidia-settings` is still available as a fallback and can be
+  forced with `backend: nvidia-settings`.
 - Safety: on any daemon stop (SIGINT/SIGTERM, panic, 5 consecutive failed
   polls) all managed GPUs are returned to auto mode.
 
 ## Requirements
 
-- Linux with the NVIDIA driver: `nvidia-smi` (reads — no root needed) and
-  `nvidia-settings` (speed writes).
-- An X display on `DISPLAY=:0` for writing via `nvidia-settings`.
-- Root for the systemd service, or passwordless sudo for interactive use
-  (sudo is prepended automatically when euid ≠ 0).
+- Linux with the NVIDIA driver; reads go through `nvidia-smi` (no root
+  needed).
+- Writes go through NVML (`libnvidia-ml`) by default: no X display, no sudo.
+  With `backend: nvidia-settings` they need X (`DISPLAY=:0`) and root, or
+  passwordless sudo for interactive use (sudo is prepended automatically when
+  euid ≠ 0).
 
 ## Building
 
@@ -39,8 +44,10 @@ driver when idle.
 go build -o nvidiatemp .
 ```
 
-A single cross-compilable binary; the only external dependency is
-`gopkg.in/yaml.v3`.
+A single binary. The build needs cgo: the NVML backend uses
+`github.com/NVIDIA/go-nvml`, which loads `libnvidia-ml` from the driver at
+runtime, so cross-compilation requires a C toolchain for the target. The other
+dependency is `gopkg.in/yaml.v3`.
 
 ## Installation (systemd)
 
@@ -53,9 +60,10 @@ sudo systemctl enable --now nvidiatemp
 systemctl status nvidiatemp
 ```
 
-If X access errors appear in the journal (`journalctl -u nvidiatemp`),
-uncomment `Environment=XAUTHORITY=/home/<user>/.Xauthority` in the unit
-(or use `xhost +local:`).
+Only relevant with `backend: nvidia-settings`: if X access errors appear in the
+journal (`journalctl -u nvidiatemp`), uncomment
+`Environment=XAUTHORITY=/home/<user>/.Xauthority` in the unit (or use
+`xhost +local:`). The default NVML backend needs no display.
 
 ## Subcommands
 
@@ -68,7 +76,8 @@ nvidiatemp curve    effective curve (common + per-index) and loop parameters
 ```
 
 The `-c <path>` flag sets the configuration file (default `/etc/nvidiatemp.yaml`)
-for `run`, `status` and `curve`. `run` has `-v` — log every tick (Debug level).
+for `run`, `status`, `set` and `curve`. `run` has `-v` — log every tick
+(Debug level).
 
 ## Configuration
 
@@ -76,9 +85,9 @@ Format and defaults are documented in the comments of
 [`deploy/nvidiatemp.example.yaml`](deploy/nvidiatemp.example.yaml). Without a
 file, built-in defaults apply: curve `50→30, 60→40, 65→45, 70→55, 75→60,
 80→70`, interval 2s, deadband 5%, pause 5s, power threshold 50W, auto-cooldown
-5 minutes. The config is validated at startup (curve temperatures strictly
-increasing, speeds within [30, 100], power threshold > 0) — on error the
-process exits with code 1 before the loop starts.
+5 minutes, backend `auto`. The config is validated at startup (curve
+temperatures strictly increasing, speeds within [30, 100], power threshold > 0,
+backend known) — on error the process exits with code 1 before the loop starts.
 
 ## Manual return to auto mode
 
@@ -91,10 +100,14 @@ nvidiatemp set auto
 sudo DISPLAY=:0 nvidia-settings -a "[gpu:0]/GPUFanControlState=0"
 ```
 
+`nvidiatemp set auto` works through NVML and therefore needs no X display;
+the raw `nvidia-settings` line above does.
+
 Check the current mode:
 
 ```sh
 DISPLAY=:0 nvidia-settings -q GPUFanControlState
+nvidiatemp status                             # works without X (NVML backend)
 ```
 
 ## Rollback

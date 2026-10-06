@@ -2,6 +2,13 @@
 # (or pass another path with -c). Every field is optional: missing fields
 # take the built-in defaults shown in the comments.
 
+# How fan control reaches the driver:
+#   auto             — NVML when available and writable, else nvidia-settings (default)
+#   nvml             — NVML only; startup fails if it cannot write (no X display needed)
+#   nvidia-settings  — nvidia-settings only; needs an X display (DISPLAY=:0) and root
+# NVML drives every fan of a GPU explicitly and needs no X display or sudo.
+backend: auto
+
 # Polling interval for temperature/power reads. Go duration ("2s", "1m30s")
 # or a number of seconds. Default: 2s.
 poll_interval: 2s

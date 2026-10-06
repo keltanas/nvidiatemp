@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nvidiatemp/internal/curve"
+	"nvidiatemp/internal/gpu"
 )
 
 func writeTempConfig(t *testing.T, content string) string {
@@ -37,6 +38,9 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	}
 	if cfg.AutoDelay != DefaultAutoDelay {
 		t.Errorf("auto delay = %v, want %v", cfg.AutoDelay, DefaultAutoDelay)
+	}
+	if cfg.Backend != gpu.BackendAuto {
+		t.Errorf("backend = %q, want %q", cfg.Backend, gpu.BackendAuto)
 	}
 	if len(cfg.Curve) != len(DefaultCurve) {
 		t.Fatalf("curve length = %d, want %d", len(cfg.Curve), len(DefaultCurve))
@@ -136,6 +140,35 @@ func TestLoadMalformedYAMLIsError(t *testing.T) {
 	path := writeTempConfig(t, "curve: [not a list of points\n  broken: {")
 	if _, err := Load(path); err == nil {
 		t.Error("malformed YAML must be an error")
+	}
+}
+
+// The fan-control backend can be pinned in the configuration file.
+func TestLoadBackend(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, "backend: nvml\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.Backend != gpu.BackendNVML {
+		t.Errorf("backend = %q, want nvml", cfg.Backend)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+}
+
+// An unknown backend is rejected before any GPU access.
+func TestLoadUnknownBackendIsError(t *testing.T) {
+	if _, err := Load(writeTempConfig(t, "backend: nvlm\n")); err == nil {
+		t.Error("unknown backend must fail at load")
+	}
+}
+
+func TestValidateRejectsUnknownBackend(t *testing.T) {
+	cfg := Default()
+	cfg.Backend = gpu.BackendKind("bogus")
+	if err := cfg.Validate(); err == nil {
+		t.Error("Validate must reject an unknown backend")
 	}
 }
 

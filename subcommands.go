@@ -75,22 +75,33 @@ func cmdRun(args []string) int {
 	}
 
 	log := newLogger(*debug)
+	backend, err := gpu.Open(cfg.Backend)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nvidiatemp: %v\n", err)
+		return 1
+	}
+	defer backend.Close()
+	if backend.Fallback != nil {
+		log.Warn("NVML unavailable, falling back to nvidia-settings", "error", backend.Fallback)
+	}
+
 	daemon := controller.NewDaemon(controller.Params{
 		PowerThresholdW: cfg.PowerThresholdW,
 		DeadbandPct:     cfg.DeadbandPct,
 		WritePause:      cfg.WritePause,
 		AutoDelay:       cfg.AutoDelay,
 		Curve:           cfg.Curve,
-	}, gpu.NewNvidiaReader(), gpu.NewNvidiaSetter())
+	}, backend.Reader, backend.Setter)
 	daemon.PollInterval = cfg.PollInterval
-	daemon.Modes = gpu.NewNvidiaModeReader()
+	daemon.Modes = backend.Modes
 	daemon.CurveFor = cfg.CurveFor
 	daemon.Log = log
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("starting", "config", *cfgPath, "poll_interval", cfg.PollInterval.String(),
+	log.Info("starting", "config", *cfgPath, "backend", backend.Kind,
+		"poll_interval", cfg.PollInterval.String(),
 		"power_threshold_w", cfg.PowerThresholdW, "deadband_pct", cfg.DeadbandPct,
 		"write_pause", cfg.WritePause.String(), "auto_delay", cfg.AutoDelay.String())
 	err = daemon.Run(ctx)
@@ -118,32 +129,40 @@ func cmdStatus(args []string) int {
 		return 2
 	}
 
-	reader := gpu.NewNvidiaReader()
-	modeReader := gpu.NewNvidiaModeReader()
-
-	infos, err := reader.Read()
+	backend, err := gpu.OpenReadOnly(cfg.Backend)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nvidiatemp: %v\n", err)
 		return 1
 	}
-	modes, err := modeReader.ReadModes()
+	defer backend.Close()
+
+	infos, err := backend.Reader.Read()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nvidiatemp: %v\n", err)
 		return 1
+	}
+	modes, modeErr := backend.Modes.ReadModes()
+	if modeErr != nil {
+		// Keep printing temperature/power/fan: the control mode needs a
+		// working write path (X display or NVML), the rest does not.
+		fmt.Fprintf(os.Stderr, "nvidiatemp: fan control mode unavailable: %v\n", modeErr)
 	}
 
 	for _, info := range infos {
-		mode := gpu.ModeAuto
+		modeText := "unknown"
 		if m, ok := modes[info.Index]; ok {
-			mode = m
+			modeText = m.String()
 		}
 		target := cfg.CurveFor(info.Index).SpeedAt(info.TempC)
 		fmt.Printf("GPU %d: %s\n", info.Index, info.Name)
 		fmt.Printf("  temperature:   %.1f°C\n", info.TempC)
 		fmt.Printf("  fan speed:     %.0f%%\n", info.FanSpeedPct)
-		fmt.Printf("  mode:          %s\n", mode)
+		fmt.Printf("  mode:          %s\n", modeText)
 		fmt.Printf("  target (curve): %.0f%%\n", target)
 		fmt.Printf("  power:         %.1f W\n", info.PowerW)
+	}
+	if modeErr != nil {
+		return 1
 	}
 	return 0
 }
@@ -153,20 +172,20 @@ func cmdStatus(args []string) int {
 // any GPU state is touched. The keyword "auto" returns all GPUs to driver
 // control instead.
 func cmdSet(args []string) int {
-	fs := flag.NewFlagSet("set", flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		return 2
+	cfg, rest, code := loadConfig("set", args)
+	if code != 0 {
+		return code
 	}
-	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "nvidiatemp: usage: nvidiatemp set <pct|auto>")
+	if len(rest) != 1 {
+		fmt.Fprintln(os.Stderr, "nvidiatemp: usage: nvidiatemp set [-c PATH] <pct|auto>")
 		return 2
 	}
 
-	auto := strings.EqualFold(fs.Arg(0), "auto")
+	auto := strings.EqualFold(rest[0], "auto")
 	var pct float64
 	if !auto {
 		var err error
-		pct, err = strconv.ParseFloat(fs.Arg(0), 64)
+		pct, err = strconv.ParseFloat(rest[0], 64)
 		if err != nil || pct < curve.MinSpeed || pct > curve.MaxSpeed {
 			fmt.Fprintf(os.Stderr, "nvidiatemp: speed must be a number in [%.0f, %.0f] (hardware minimum is %.0f%%)\n",
 				curve.MinSpeed, curve.MaxSpeed, curve.MinSpeed)
@@ -174,10 +193,14 @@ func cmdSet(args []string) int {
 		}
 	}
 
-	reader := gpu.NewNvidiaReader()
-	setter := gpu.NewNvidiaSetter()
+	backend, err := gpu.Open(cfg.Backend)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nvidiatemp: %v\n", err)
+		return 1
+	}
+	defer backend.Close()
 
-	infos, err := reader.Read()
+	infos, err := backend.Reader.Read()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nvidiatemp: %v\n", err)
 		return 1
@@ -186,14 +209,14 @@ func cmdSet(args []string) int {
 	failed := false
 	for _, info := range infos {
 		if auto {
-			if err := setter.SetAuto(info.Index); err != nil {
+			if err := backend.Setter.SetAuto(info.Index); err != nil {
 				fmt.Fprintf(os.Stderr, "nvidiatemp: GPU %d: %v\n", info.Index, err)
 				failed = true
 				continue
 			}
 			fmt.Printf("GPU %d: auto mode\n", info.Index)
 		} else {
-			if err := setter.SetManual(info.Index, pct); err != nil {
+			if err := backend.Setter.SetManual(info.Index, pct); err != nil {
 				fmt.Fprintf(os.Stderr, "nvidiatemp: GPU %d: %v\n", info.Index, err)
 				failed = true
 				continue

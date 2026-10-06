@@ -24,6 +24,7 @@ func curveOutput(cfg *config.Config) string {
 	fmt.Fprintf(&b, "write pause:      %s\n", cfg.WritePause)
 	fmt.Fprintf(&b, "power threshold:  %s W\n", fmtNum(cfg.PowerThresholdW))
 	fmt.Fprintf(&b, "auto delay:       %s\n", cfg.AutoDelay)
+	fmt.Fprintf(&b, "backend:          %s\n", cfg.Backend)
 
 	b.WriteString("\ndefault curve:\n")
 	writeCurvePoints(&b, cfg.Curve)

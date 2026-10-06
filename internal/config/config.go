@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"nvidiatemp/internal/curve"
+	"nvidiatemp/internal/gpu"
 )
 
 // DefaultPath is the default configuration file location.
@@ -46,6 +47,7 @@ type Config struct {
 	WritePause      time.Duration
 	PowerThresholdW float64 // W
 	AutoDelay       time.Duration
+	Backend         gpu.BackendKind // how fan control reaches the driver
 	Curve           curve.Curve
 	PerIndex        map[int]curve.Curve // optional per-GPU-index curve overrides
 }
@@ -94,6 +96,7 @@ type rawConfig struct {
 	WritePause     *duration          `yaml:"write_pause"`
 	PowerThreshold *float64           `yaml:"power_threshold"`
 	AutoDelay      *duration          `yaml:"auto_delay"`
+	Backend        *string            `yaml:"backend"`
 	Curve          *[]rawPoint        `yaml:"curve"`
 	GPUCurves      map[int][]rawPoint `yaml:"gpu_curves"`
 }
@@ -108,6 +111,7 @@ func Default() *Config {
 		WritePause:      DefaultWritePause,
 		PowerThresholdW: DefaultPowerThresholdW,
 		AutoDelay:       DefaultAutoDelay,
+		Backend:         gpu.BackendAuto,
 		Curve:           c,
 		PerIndex:        map[int]curve.Curve{},
 	}
@@ -144,6 +148,13 @@ func Load(path string) (*Config, error) {
 	if raw.AutoDelay != nil {
 		cfg.AutoDelay = raw.AutoDelay.Duration
 	}
+	if raw.Backend != nil {
+		backend, berr := gpu.ParseBackendKind(*raw.Backend)
+		if berr != nil {
+			return nil, fmt.Errorf("parse config %s: %w", path, berr)
+		}
+		cfg.Backend = backend
+	}
 	if raw.Curve != nil {
 		cfg.Curve = toCurve(*raw.Curve)
 	}
@@ -155,10 +166,14 @@ func Load(path string) (*Config, error) {
 
 // Validate checks the effective configuration: every curve (common and
 // per-index) must have strictly increasing temperatures with speeds in
-// [30, 100], and the power threshold must be positive.
+// [30, 100], the power threshold must be positive and the backend must be
+// known.
 func (c *Config) Validate() error {
 	if c.PowerThresholdW <= 0 {
 		return fmt.Errorf("power threshold must be positive, got %g W", c.PowerThresholdW)
+	}
+	if _, err := gpu.ParseBackendKind(string(c.Backend)); err != nil {
+		return err
 	}
 	if err := c.Curve.Validate(); err != nil {
 		return fmt.Errorf("common curve: %w", err)
