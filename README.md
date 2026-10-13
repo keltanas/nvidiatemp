@@ -56,6 +56,9 @@ A single binary. The build needs cgo: the NVML backend uses
 runtime, so cross-compilation requires a C toolchain for the target. The other
 dependency is `gopkg.in/yaml.v3`.
 
+Prebuilt `linux/amd64` and `linux/arm64` binaries are attached to every `v*`
+tag release — download the tarball and skip this section.
+
 ## Installation (systemd)
 
 ```sh

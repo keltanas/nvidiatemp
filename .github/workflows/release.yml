@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            cc: gcc
+          - arch: arm64
+            cc: aarch64-linux-gnu-gcc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+
+      # NVML is loaded with dlopen, so only a C toolchain for the target is
+      # needed — no driver, no CUDA toolkit.
+      - name: Install cross toolchain
+        if: matrix.arch == 'arm64'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        env:
+          GOARCH: ${{ matrix.arch }}
+          CC: ${{ matrix.cc }}
+          CGO_ENABLED: "1"
+        run: |
+          go build -trimpath -ldflags "-s -w" -o "nvidiatemp-linux-${{ matrix.arch }}" .
+
+      - name: Package
+        run: |
+          tar -czf "dist/nvidiatemp-linux-${{ matrix.arch }}.tar.gz" \
+            "nvidiatemp-linux-${{ matrix.arch }}" \
+            LICENSE README.md README_RU.md \
+            deploy/nvidiatemp.example.yaml deploy/nvidiatemp.service
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nvidiatemp-linux-${{ matrix.arch }}
+          path: dist/*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Publish
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*/*.tar.gz --generate-notes --title "$GITHUB_REF_NAME" \
+            || gh release upload "$GITHUB_REF_NAME" dist/*/*.tar.gz --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
