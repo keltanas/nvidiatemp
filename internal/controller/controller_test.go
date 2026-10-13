@@ -11,10 +11,12 @@ import (
 // defaultParams mirrors the built-in defaults: 50W / 5% / 5s / 5m, default curve.
 func defaultParams() Params {
 	return Params{
-		PowerThresholdW: 50,
-		DeadbandPct:     5,
-		WritePause:      5 * time.Second,
-		AutoDelay:       5 * time.Minute,
+		PowerThresholdW:   50,
+		DeadbandPct:       5,
+		WritePause:        5 * time.Second,
+		AutoDelay:         5 * time.Minute,
+		QuietThresholdPct: 30,
+		QuietHold:         3 * time.Minute,
 		Curve: curve.Curve{
 			{Temp: 50, Speed: 30},
 			{Temp: 60, Speed: 40},
@@ -31,7 +33,7 @@ var now = time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 func TestTickEntryOnPowerAboveThreshold(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 62, PowerW: 51, FanSpeedPct: 30, Mode: gpu.ModeAuto}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionSwitchManual {
 		t.Fatalf("action = %v, want switch-manual", a.Kind)
 	}
@@ -47,7 +49,7 @@ func TestTickEntryOnPowerAboveThreshold(t *testing.T) {
 func TestTickNoEntryAtExactThreshold(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 62, PowerW: 50, FanSpeedPct: 30, Mode: gpu.ModeAuto}
-	if a, _ := Tick(p, s, now); a.Kind != ActionNoop {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionNoop {
 		t.Errorf("action at power == threshold = %v, want noop", a.Kind)
 	}
 }
@@ -59,7 +61,7 @@ func TestTickStaysManualWhileHot(t *testing.T) {
 	p := defaultParams()
 	for temp, current := range map[float64]float64{50: 30, 75: 60} { // == and > lower bound
 		s := State{TempC: temp, PowerW: 12, FanSpeedPct: current, Mode: gpu.ModeManual}
-		if a, idleSince := Tick(p, s, now); a.Kind != ActionNoop || !idleSince.IsZero() {
+		if a, idleSince, _ := Tick(p, s, now); a.Kind != ActionNoop || !idleSince.IsZero() {
 			t.Errorf("temp %v°C: action = %v, idleSince = %v; want noop without cooldown", temp, a.Kind, idleSince)
 		}
 	}
@@ -70,7 +72,7 @@ func TestTickStaysManualWhileHot(t *testing.T) {
 func TestTickStaysManualButUpdatesSpeedWhileHot(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 75, PowerW: 12, FanSpeedPct: 40, Mode: gpu.ModeManual} // target 60
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind == ActionSwitchAuto {
 		t.Fatalf("switched to auto while the card is still hot")
 	}
@@ -87,7 +89,7 @@ func TestTickStaysManualButUpdatesSpeedWhileHot(t *testing.T) {
 func TestTickStaysManualWhenPowerHighEvenIfCold(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 45, PowerW: 60, FanSpeedPct: 30, Mode: gpu.ModeManual}
-	if a, idleSince := Tick(p, s, now); a.Kind != ActionNoop || !idleSince.IsZero() {
+	if a, idleSince, _ := Tick(p, s, now); a.Kind != ActionNoop || !idleSince.IsZero() {
 		t.Errorf("action = %v, idleSince = %v; want noop without cooldown (power above threshold)", a.Kind, idleSince)
 	}
 }
@@ -98,7 +100,7 @@ func TestTickDeadbandBelow(t *testing.T) {
 	p := defaultParams()
 	// temp 62 → target 42; current 40 → deviation 2 < 5.
 	s := State{TempC: 62, PowerW: 60, FanSpeedPct: 40, Mode: gpu.ModeManual}
-	if a, _ := Tick(p, s, now); a.Kind != ActionNoop {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionNoop {
 		t.Errorf("action = %v, want noop (deviation below deadband)", a.Kind)
 	}
 }
@@ -108,7 +110,7 @@ func TestTickDeadbandBoundary(t *testing.T) {
 	p := defaultParams()
 	// temp 65 → target 45; current 40 → deviation 5 == deadband.
 	s := State{TempC: 65, PowerW: 60, FanSpeedPct: 40, Mode: gpu.ModeManual}
-	a, _ := Tick(p, s, now)
+	a, _, _ := Tick(p, s, now)
 	if a.Kind != ActionUpdateSpeed || a.Speed != 45 {
 		t.Errorf("action = %+v, want update-speed 45", a)
 	}
@@ -119,7 +121,7 @@ func TestTickSpeedUpdate(t *testing.T) {
 	p := defaultParams()
 	// temp 70 → target 55; current 40 → deviation 15 ≥ 5.
 	s := State{TempC: 70, PowerW: 60, FanSpeedPct: 40, Mode: gpu.ModeManual}
-	a, _ := Tick(p, s, now)
+	a, _, _ := Tick(p, s, now)
 	if a.Kind != ActionUpdateSpeed || a.Speed != 55 {
 		t.Errorf("action = %+v, want update-speed 55", a)
 	}
@@ -134,12 +136,12 @@ func TestTickWritePauseDefersSpeedUpdate(t *testing.T) {
 
 	// Last write 4s ago → the 5s pause has not elapsed.
 	s.LastWrite = now.Add(-4 * time.Second)
-	if a, _ := Tick(p, s, now); a.Kind != ActionNoop {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionNoop {
 		t.Errorf("at +4s action = %v, want noop (pause not elapsed)", a.Kind)
 	}
 	// Last write 5s ago → pause elapsed, deviation persists → write.
 	s.LastWrite = now.Add(-5 * time.Second)
-	if a, _ := Tick(p, s, now); a.Kind != ActionUpdateSpeed {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionUpdateSpeed {
 		t.Errorf("at +5s action = %v, want update-speed", a.Kind)
 	}
 }
@@ -149,11 +151,11 @@ func TestTickWritePauseDefersSpeedUpdate(t *testing.T) {
 func TestTickWritePauseDefersModeSwitch(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 62, PowerW: 80, FanSpeedPct: 30, Mode: gpu.ModeAuto, LastWrite: now.Add(-1 * time.Second)}
-	if a, _ := Tick(p, s, now); a.Kind != ActionNoop {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionNoop {
 		t.Errorf("action = %v, want noop (last write 1s ago)", a.Kind)
 	}
 	s.LastWrite = now.Add(-5 * time.Second)
-	if a, _ := Tick(p, s, now); a.Kind != ActionSwitchManual {
+	if a, _, _ := Tick(p, s, now); a.Kind != ActionSwitchManual {
 		t.Errorf("action = %v, want switch-manual after the pause", a.Kind)
 	}
 }
@@ -163,7 +165,7 @@ func TestTickWritePauseDefersModeSwitch(t *testing.T) {
 func TestTickTargetClampedAboveCurve(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 95, PowerW: 60, FanSpeedPct: 40, Mode: gpu.ModeManual}
-	a, _ := Tick(p, s, now)
+	a, _, _ := Tick(p, s, now)
 	if a.Kind != ActionUpdateSpeed || a.Speed != 70 {
 		t.Errorf("action = %+v, want update-speed 70 (clamped)", a)
 	}
@@ -177,7 +179,7 @@ func TestTickTargetClampedAboveCurve(t *testing.T) {
 func TestTickIdleStartsCooldown(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 49, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionNoop {
 		t.Errorf("action = %+v, want noop (fan already at minimum)", a)
 	}
@@ -191,7 +193,7 @@ func TestTickIdleStartsCooldown(t *testing.T) {
 func TestTickIdleStartsCooldownAndDropsToMinimum(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 49, PowerW: 12, FanSpeedPct: 55, Mode: gpu.ModeManual}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionUpdateSpeed || a.Speed != curve.MinSpeed {
 		t.Errorf("action = %+v, want update-speed %v (minimum)", a, curve.MinSpeed)
 	}
@@ -205,7 +207,7 @@ func TestTickCooldownNotYetElapsed(t *testing.T) {
 	p := defaultParams()
 	started := now.Add(-4 * time.Minute)
 	s := State{TempC: 49, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual, IdleSince: started}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionNoop {
 		t.Errorf("action = %+v, want noop (cooldown in progress)", a)
 	}
@@ -218,7 +220,7 @@ func TestTickCooldownNotYetElapsed(t *testing.T) {
 func TestTickCooldownElapsedSwitchesToAuto(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 49, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual, IdleSince: now.Add(-5 * time.Minute)}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionSwitchAuto {
 		t.Errorf("action = %+v, want switch-auto after the delay", a)
 	}
@@ -233,7 +235,7 @@ func TestTickCooldownSwitchRespectsWritePause(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 49, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual,
 		IdleSince: now.Add(-6 * time.Minute), LastWrite: now.Add(-1 * time.Second)}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionNoop {
 		t.Errorf("action = %+v, want noop (write pause not elapsed)", a)
 	}
@@ -247,7 +249,7 @@ func TestTickCooldownSwitchRespectsWritePause(t *testing.T) {
 func TestTickCooldownCancelledByPower(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 62, PowerW: 80, FanSpeedPct: 30, Mode: gpu.ModeManual, IdleSince: now.Add(-2 * time.Minute)}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if !idleSince.IsZero() {
 		t.Errorf("cooldown must be cancelled, got idleSince = %v", idleSince)
 	}
@@ -262,7 +264,7 @@ func TestTickCooldownCancelledByPower(t *testing.T) {
 func TestTickCooldownCancelledByTemp(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 55, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual, IdleSince: now.Add(-2 * time.Minute)}
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if !idleSince.IsZero() {
 		t.Errorf("cooldown must be cancelled, got idleSince = %v", idleSince)
 	}
@@ -272,12 +274,109 @@ func TestTickCooldownCancelledByTemp(t *testing.T) {
 	}
 }
 
+// The driver spins the fan up on its own while the card is idle and cold:
+// nvidiatemp takes the card over at the curve speed (30% at idle with the
+// default curve) and starts a quiet hold.
+func TestTickQuietHoldCatchesDriverFanSpinUp(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 45, PowerW: 12, FanSpeedPct: 100, Mode: gpu.ModeAuto}
+	a, _, quietSince := Tick(p, s, now)
+	if a.Kind != ActionSwitchManual || a.Speed != 30 {
+		t.Errorf("action = %+v, want switch-manual 30 (curve)", a)
+	}
+	if !quietSince.Equal(now) {
+		t.Errorf("quietSince = %v, want the current tick time", quietSince)
+	}
+}
+
+// No quiet hold below the threshold: a card sitting at the minimum speed in
+// auto mode is left to the driver.
+func TestTickNoQuietHoldBelowThreshold(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 45, PowerW: 12, FanSpeedPct: 29, Mode: gpu.ModeAuto}
+	if a, _, quietSince := Tick(p, s, now); a.Kind != ActionNoop || !quietSince.IsZero() {
+		t.Errorf("action = %v, quietSince = %v; want noop", a.Kind, quietSince)
+	}
+}
+
+// The card is genuinely hot: the driver is allowed to cool it, no quiet hold.
+func TestTickNoQuietHoldWhenHot(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 55, PowerW: 12, FanSpeedPct: 100, Mode: gpu.ModeAuto}
+	if a, _, quietSince := Tick(p, s, now); a.Kind != ActionNoop || !quietSince.IsZero() {
+		t.Errorf("action = %v, quietSince = %v; want noop (card hot)", a.Kind, quietSince)
+	}
+}
+
+// Load above the threshold means the fan is doing its job, not running away.
+func TestTickNoQuietHoldUnderLoad(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 45, PowerW: 80, FanSpeedPct: 100, Mode: gpu.ModeAuto}
+	a, _, quietSince := Tick(p, s, now)
+	if a.Kind != ActionSwitchManual || quietSince.IsZero() == false {
+		t.Errorf("action = %+v, quietSince = %v; want plain curve entry without a quiet hold", a, quietSince)
+	}
+}
+
+// quiet_hold: 0 disables the whole feature: the driver keeps the fan.
+func TestTickQuietHoldDisabled(t *testing.T) {
+	p := defaultParams()
+	p.QuietHold = 0
+	s := State{TempC: 45, PowerW: 12, FanSpeedPct: 100, Mode: gpu.ModeAuto}
+	if a, _, quietSince := Tick(p, s, now); a.Kind != ActionNoop || !quietSince.IsZero() {
+		t.Errorf("action = %v, quietSince = %v; want noop (feature disabled)", a.Kind, quietSince)
+	}
+}
+
+// The hold is over: the card goes back to driver control, the mark resets.
+func TestTickQuietHoldElapsedSwitchesToAuto(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 45, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual,
+		QuietSince: now.Add(-3 * time.Minute), LastWrite: now.Add(-time.Minute)}
+	a, _, quietSince := Tick(p, s, now)
+	if a.Kind != ActionSwitchAuto {
+		t.Errorf("action = %+v, want switch-auto after the hold", a)
+	}
+	if !quietSince.IsZero() {
+		t.Errorf("quietSince must reset on the switch, got %v", quietSince)
+	}
+}
+
+// Hold in progress: no switch, the card follows the ordinary curve rules.
+func TestTickQuietHoldNotYetElapsed(t *testing.T) {
+	p := defaultParams()
+	started := now.Add(-2 * time.Minute)
+	s := State{TempC: 45, PowerW: 12, FanSpeedPct: 30, Mode: gpu.ModeManual,
+		QuietSince: started, LastWrite: now.Add(-time.Minute)}
+	a, _, quietSince := Tick(p, s, now)
+	if a.Kind == ActionSwitchAuto {
+		t.Error("switched to auto while the hold is still running")
+	}
+	if !quietSince.Equal(started) {
+		t.Errorf("quietSince = %v, want the original start %v", quietSince, started)
+	}
+}
+
+// Load returns during the hold: it ends early, control follows the curve.
+func TestTickQuietHoldCancelledByLoad(t *testing.T) {
+	p := defaultParams()
+	s := State{TempC: 62, PowerW: 80, FanSpeedPct: 30, Mode: gpu.ModeManual,
+		QuietSince: now.Add(-2 * time.Minute)}
+	a, _, quietSince := Tick(p, s, now)
+	if !quietSince.IsZero() {
+		t.Errorf("the hold must be cancelled by load, got %v", quietSince)
+	}
+	if a.Kind != ActionUpdateSpeed || a.Speed != 42 {
+		t.Errorf("action = %+v, want update-speed 42 (curve control resumes)", a)
+	}
+}
+
 // A card left in manual mode at startup: an idle cold card enters the
 // cooldown (drops to minimum), not straight to auto.
 func TestTickTakesOverCardLeftInManual(t *testing.T) {
 	p := defaultParams()
 	s := State{TempC: 40, PowerW: 15, FanSpeedPct: 60, Mode: gpu.ModeManual} // LastWrite zero
-	a, idleSince := Tick(p, s, now)
+	a, idleSince, _ := Tick(p, s, now)
 	if a.Kind != ActionUpdateSpeed || a.Speed != curve.MinSpeed {
 		t.Errorf("action = %+v, want update-speed %v (cooldown start)", a, curve.MinSpeed)
 	}

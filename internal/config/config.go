@@ -27,6 +27,13 @@ const (
 	// hold, the fan is held at minimum speed this long before switching to
 	// auto mode (cancelled if load returns in the meantime).
 	DefaultAutoDelay = 5 * time.Minute
+	// DefaultQuietThresholdPct is the fan speed in auto mode that counts as
+	// «the driver started spinning the fan up»: by default any speed above
+	// the hardware minimum in manual mode (30%).
+	DefaultQuietThresholdPct = 30.0
+	// DefaultQuietHold is how long such a card stays in manual mode before
+	// being handed back to the driver.
+	DefaultQuietHold = 3 * time.Minute
 )
 
 // DefaultCurve is the built-in default curve: 50→30, 60→40, 65→45, 70→55,
@@ -42,14 +49,16 @@ var DefaultCurve = curve.Curve{
 
 // Config is the effective configuration with all defaults applied.
 type Config struct {
-	PollInterval    time.Duration
-	DeadbandPct     float64 // %
-	WritePause      time.Duration
-	PowerThresholdW float64 // W
-	AutoDelay       time.Duration
-	Backend         gpu.BackendKind // how fan control reaches the driver
-	Curve           curve.Curve
-	PerIndex        map[int]curve.Curve // optional per-GPU-index curve overrides
+	PollInterval      time.Duration
+	DeadbandPct       float64 // %
+	WritePause        time.Duration
+	PowerThresholdW   float64 // W
+	AutoDelay         time.Duration
+	QuietThresholdPct float64         // %; auto-mode fan speed that triggers a quiet hold
+	QuietHold         time.Duration   // manual mode this long after a quiet trigger; 0 disables it
+	Backend           gpu.BackendKind // how fan control reaches the driver
+	Curve             curve.Curve
+	PerIndex          map[int]curve.Curve // optional per-GPU-index curve overrides
 }
 
 // duration accepts either a Go duration string ("2s", "1m30s") or a bare
@@ -96,6 +105,8 @@ type rawConfig struct {
 	WritePause     *duration          `yaml:"write_pause"`
 	PowerThreshold *float64           `yaml:"power_threshold"`
 	AutoDelay      *duration          `yaml:"auto_delay"`
+	QuietThreshold *float64           `yaml:"quiet_threshold"`
+	QuietHold      *duration          `yaml:"quiet_hold"`
 	Backend        *string            `yaml:"backend"`
 	Curve          *[]rawPoint        `yaml:"curve"`
 	GPUCurves      map[int][]rawPoint `yaml:"gpu_curves"`
@@ -106,14 +117,16 @@ func Default() *Config {
 	c := make(curve.Curve, len(DefaultCurve))
 	copy(c, DefaultCurve)
 	return &Config{
-		PollInterval:    DefaultPollInterval,
-		DeadbandPct:     DefaultDeadbandPct,
-		WritePause:      DefaultWritePause,
-		PowerThresholdW: DefaultPowerThresholdW,
-		AutoDelay:       DefaultAutoDelay,
-		Backend:         gpu.BackendAuto,
-		Curve:           c,
-		PerIndex:        map[int]curve.Curve{},
+		PollInterval:      DefaultPollInterval,
+		DeadbandPct:       DefaultDeadbandPct,
+		WritePause:        DefaultWritePause,
+		PowerThresholdW:   DefaultPowerThresholdW,
+		AutoDelay:         DefaultAutoDelay,
+		QuietThresholdPct: DefaultQuietThresholdPct,
+		QuietHold:         DefaultQuietHold,
+		Backend:           gpu.BackendAuto,
+		Curve:             c,
+		PerIndex:          map[int]curve.Curve{},
 	}
 }
 
@@ -148,6 +161,12 @@ func Load(path string) (*Config, error) {
 	if raw.AutoDelay != nil {
 		cfg.AutoDelay = raw.AutoDelay.Duration
 	}
+	if raw.QuietThreshold != nil {
+		cfg.QuietThresholdPct = *raw.QuietThreshold
+	}
+	if raw.QuietHold != nil {
+		cfg.QuietHold = raw.QuietHold.Duration
+	}
 	if raw.Backend != nil {
 		backend, berr := gpu.ParseBackendKind(*raw.Backend)
 		if berr != nil {
@@ -171,6 +190,12 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.PowerThresholdW <= 0 {
 		return fmt.Errorf("power threshold must be positive, got %g W", c.PowerThresholdW)
+	}
+	if c.QuietHold < 0 {
+		return fmt.Errorf("quiet hold must not be negative, got %s", c.QuietHold)
+	}
+	if c.QuietHold > 0 && (c.QuietThresholdPct <= 0 || c.QuietThresholdPct > 100) {
+		return fmt.Errorf("quiet threshold must be within (0, 100], got %g%%", c.QuietThresholdPct)
 	}
 	if _, err := gpu.ParseBackendKind(string(c.Backend)); err != nil {
 		return err

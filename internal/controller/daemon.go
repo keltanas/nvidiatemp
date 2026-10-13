@@ -37,9 +37,10 @@ type Daemon struct {
 
 // gpuState is the per-GPU internal state kept between ticks.
 type gpuState struct {
-	mode      gpu.Mode
-	lastWrite time.Time
-	idleSince time.Time // auto-cooldown start; zero means «not cooling down»
+	mode       gpu.Mode
+	lastWrite  time.Time
+	idleSince  time.Time // auto-cooldown start; zero means «not cooling down»
+	quietSince time.Time // quiet-hold start; zero means «not in a quiet hold»
 }
 
 // NewDaemon returns a Daemon with default failure tracking, logging and clock.
@@ -122,20 +123,27 @@ func (d *Daemon) process(infos []gpu.Info, states map[int]*gpuState, now time.Ti
 			Mode:        st.mode,
 			LastWrite:   st.lastWrite,
 			IdleSince:   st.idleSince,
+			QuietSince:  st.quietSince,
 		}
 		params := d.Params
 		if d.CurveFor != nil {
 			params.Curve = d.CurveFor(info.Index)
 		}
-		action, idleSince := Tick(params, state, now)
+		action, idleSince, quietSince := Tick(params, state, now)
 		switch {
 		case st.idleSince.IsZero() && !idleSince.IsZero():
 			d.log().Info("auto-cooldown started", "gpu", info.Index,
 				"delay", d.Params.AutoDelay.String(), "speed", curve.MinSpeed)
 		case !st.idleSince.IsZero() && idleSince.IsZero() && action.Kind != ActionSwitchAuto:
 			d.log().Info("auto-cooldown cancelled (load returned)", "gpu", info.Index)
+		case st.quietSince.IsZero() && !quietSince.IsZero():
+			d.log().Info("quiet hold started", "gpu", info.Index,
+				"fan", info.FanSpeedPct, "hold", d.Params.QuietHold.String())
+		case !st.quietSince.IsZero() && quietSince.IsZero():
+			d.log().Info("quiet hold ended", "gpu", info.Index)
 		}
 		st.idleSince = idleSince
+		st.quietSince = quietSince
 		d.log().Debug("tick", "gpu", info.Index, "temp", info.TempC, "power", info.PowerW,
 			"fan", info.FanSpeedPct, "mode", state.Mode, "action", action.Kind)
 		if err := d.apply(action, info.Index, st, now); err != nil {

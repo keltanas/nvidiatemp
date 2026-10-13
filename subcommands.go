@@ -86,11 +86,13 @@ func cmdRun(args []string) int {
 	}
 
 	daemon := controller.NewDaemon(controller.Params{
-		PowerThresholdW: cfg.PowerThresholdW,
-		DeadbandPct:     cfg.DeadbandPct,
-		WritePause:      cfg.WritePause,
-		AutoDelay:       cfg.AutoDelay,
-		Curve:           cfg.Curve,
+		PowerThresholdW:   cfg.PowerThresholdW,
+		DeadbandPct:       cfg.DeadbandPct,
+		WritePause:        cfg.WritePause,
+		AutoDelay:         cfg.AutoDelay,
+		QuietThresholdPct: cfg.QuietThresholdPct,
+		QuietHold:         cfg.QuietHold,
+		Curve:             cfg.Curve,
 	}, backend.Reader, backend.Setter)
 	daemon.PollInterval = cfg.PollInterval
 	daemon.Modes = backend.Modes
@@ -103,7 +105,8 @@ func cmdRun(args []string) int {
 	log.Info("starting", "config", *cfgPath, "backend", backend.Kind,
 		"poll_interval", cfg.PollInterval.String(),
 		"power_threshold_w", cfg.PowerThresholdW, "deadband_pct", cfg.DeadbandPct,
-		"write_pause", cfg.WritePause.String(), "auto_delay", cfg.AutoDelay.String())
+		"write_pause", cfg.WritePause.String(), "auto_delay", cfg.AutoDelay.String(),
+		"quiet_threshold_pct", cfg.QuietThresholdPct, "quiet_hold", cfg.QuietHold.String())
 	err = daemon.Run(ctx)
 	switch {
 	case err == nil:

@@ -33,6 +33,15 @@ power_threshold: 50
 # follows the curve again. Go duration or seconds. Default: 5m.
 auto_delay: 5m
 
+# Catch a fan the driver spins up on its own (the card heats up with no
+# load): in auto mode, a fan speed >= quiet_threshold with power below the
+# power threshold and temperature below the curve's lower bound takes the
+# card into manual mode (speed from the curve) for quiet_hold, then hands it
+# back to the driver. Load or heat arriving sooner ends the hold early.
+# quiet_hold: 0 disables this. Default: threshold 30, hold 3m.
+quiet_threshold: 30
+quiet_hold: 3m
+
 # Common curve «temperature (°C) → fan speed (%)». Temperatures must strictly
 # increase; speeds must be within [30, 100] — the card's hardware minimum in
 # manual mode is 30%. Below the first point the first speed applies, above

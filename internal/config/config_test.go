@@ -39,6 +39,12 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	if cfg.AutoDelay != DefaultAutoDelay {
 		t.Errorf("auto delay = %v, want %v", cfg.AutoDelay, DefaultAutoDelay)
 	}
+	if cfg.QuietThresholdPct != DefaultQuietThresholdPct {
+		t.Errorf("quiet threshold = %v, want %v", cfg.QuietThresholdPct, DefaultQuietThresholdPct)
+	}
+	if cfg.QuietHold != DefaultQuietHold {
+		t.Errorf("quiet hold = %v, want %v", cfg.QuietHold, DefaultQuietHold)
+	}
 	if cfg.Backend != gpu.BackendAuto {
 		t.Errorf("backend = %q, want %q", cfg.Backend, gpu.BackendAuto)
 	}
@@ -140,6 +146,32 @@ func TestLoadMalformedYAMLIsError(t *testing.T) {
 	path := writeTempConfig(t, "curve: [not a list of points\n  broken: {")
 	if _, err := Load(path); err == nil {
 		t.Error("malformed YAML must be an error")
+	}
+}
+
+// The quiet hold (catch a driver fan spin-up on an idle card) is
+// configurable; quiet_hold: 0 disables it.
+func TestLoadQuietHold(t *testing.T) {
+	cfg, err := Load(writeTempConfig(t, "quiet_threshold: 45\nquiet_hold: 90\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.QuietThresholdPct != 45 {
+		t.Errorf("quiet threshold = %v, want 45", cfg.QuietThresholdPct)
+	}
+	if cfg.QuietHold != 90*time.Second {
+		t.Errorf("quiet hold = %v, want 90s", cfg.QuietHold)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+
+	off, err := Load(writeTempConfig(t, "quiet_hold: 0\n"))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if off.QuietHold != 0 {
+		t.Errorf("quiet hold = %v, want 0 (disabled)", off.QuietHold)
 	}
 }
 

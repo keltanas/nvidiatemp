@@ -118,6 +118,42 @@ func TestDaemonProcessExit(t *testing.T) {
 	}
 }
 
+// The driver spins the fan up on an idle cold card: the daemon takes it
+// over, holds it quiet for QuietHold and then returns it to the driver.
+func TestDaemonProcessQuietHold(t *testing.T) {
+	p := defaultParams()
+	setter := &fakeSetter{}
+	d := NewDaemon(p, &scriptedReader{}, setter)
+	states := map[int]*gpuState{0: {mode: gpu.ModeAuto}}
+	now := time.Now()
+
+	d.process([]gpu.Info{{Index: 0, TempC: 45, PowerW: 10, FanSpeedPct: 100}}, states, now)
+	if states[0].mode != gpu.ModeManual || setter.manual[0] != 30 {
+		t.Fatalf("mode = %v, speed = %v; want manual at 30", states[0].mode, setter.manual[0])
+	}
+	if !states[0].quietSince.Equal(now) {
+		t.Fatalf("quietSince = %v, want the current tick time", states[0].quietSince)
+	}
+
+	// Hold in progress: still manual.
+	d.process([]gpu.Info{{Index: 0, TempC: 45, PowerW: 10, FanSpeedPct: 30}}, states, now.Add(2*time.Minute))
+	if states[0].mode != gpu.ModeManual {
+		t.Errorf("mode during the hold = %v, want manual", states[0].mode)
+	}
+
+	// Hold elapsed: back to the driver.
+	d.process([]gpu.Info{{Index: 0, TempC: 45, PowerW: 10, FanSpeedPct: 30}}, states, now.Add(3*time.Minute))
+	if states[0].mode != gpu.ModeAuto {
+		t.Errorf("mode after the hold = %v, want auto", states[0].mode)
+	}
+	if !states[0].quietSince.IsZero() {
+		t.Errorf("quietSince must be reset, got %v", states[0].quietSince)
+	}
+	if len(setter.auto) != 1 || setter.auto[0] != 0 {
+		t.Errorf("auto calls = %v, want [0]", setter.auto)
+	}
+}
+
 // Load returning during the cooldown cancels it: curve control resumes.
 func TestDaemonProcessCooldownCancelled(t *testing.T) {
 	p := defaultParams()
