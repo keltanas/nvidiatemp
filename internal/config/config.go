@@ -34,6 +34,11 @@ const (
 	// DefaultQuietHold is how long such a card stays in manual mode before
 	// being handed back to the driver.
 	DefaultQuietHold = 3 * time.Minute
+	// DefaultQuietTempC is the idle temperature that arms the quiet hold.
+	DefaultQuietTempC = 50.0
+	// DefaultQuietDelay is how long the idle card must stay at or above
+	// DefaultQuietTempC before the quiet hold starts.
+	DefaultQuietDelay = time.Minute
 )
 
 // DefaultCurve is the built-in default curve: 50→30, 60→40, 65→45, 70→55,
@@ -56,6 +61,8 @@ type Config struct {
 	AutoDelay         time.Duration
 	QuietThresholdPct float64         // %; auto-mode fan speed that triggers a quiet hold
 	QuietHold         time.Duration   // manual mode this long after a quiet trigger; 0 disables it
+	QuietTempC        float64         // °C; idle temperature that arms a quiet hold
+	QuietDelay        time.Duration   // how long QuietTempC must hold before the hold starts
 	Backend           gpu.BackendKind // how fan control reaches the driver
 	Curve             curve.Curve
 	PerIndex          map[int]curve.Curve // optional per-GPU-index curve overrides
@@ -107,6 +114,8 @@ type rawConfig struct {
 	AutoDelay      *duration          `yaml:"auto_delay"`
 	QuietThreshold *float64           `yaml:"quiet_threshold"`
 	QuietHold      *duration          `yaml:"quiet_hold"`
+	QuietTemp      *float64           `yaml:"quiet_temp"`
+	QuietDelay     *duration          `yaml:"quiet_delay"`
 	Backend        *string            `yaml:"backend"`
 	Curve          *[]rawPoint        `yaml:"curve"`
 	GPUCurves      map[int][]rawPoint `yaml:"gpu_curves"`
@@ -124,6 +133,8 @@ func Default() *Config {
 		AutoDelay:         DefaultAutoDelay,
 		QuietThresholdPct: DefaultQuietThresholdPct,
 		QuietHold:         DefaultQuietHold,
+		QuietTempC:        DefaultQuietTempC,
+		QuietDelay:        DefaultQuietDelay,
 		Backend:           gpu.BackendAuto,
 		Curve:             c,
 		PerIndex:          map[int]curve.Curve{},
@@ -167,6 +178,12 @@ func Load(path string) (*Config, error) {
 	if raw.QuietHold != nil {
 		cfg.QuietHold = raw.QuietHold.Duration
 	}
+	if raw.QuietTemp != nil {
+		cfg.QuietTempC = *raw.QuietTemp
+	}
+	if raw.QuietDelay != nil {
+		cfg.QuietDelay = raw.QuietDelay.Duration
+	}
 	if raw.Backend != nil {
 		backend, berr := gpu.ParseBackendKind(*raw.Backend)
 		if berr != nil {
@@ -196,6 +213,12 @@ func (c *Config) Validate() error {
 	}
 	if c.QuietHold > 0 && (c.QuietThresholdPct <= 0 || c.QuietThresholdPct > 100) {
 		return fmt.Errorf("quiet threshold must be within (0, 100], got %g%%", c.QuietThresholdPct)
+	}
+	if c.QuietHold > 0 && c.QuietTempC <= 0 {
+		return fmt.Errorf("quiet temperature must be positive, got %g °C", c.QuietTempC)
+	}
+	if c.QuietHold > 0 && c.QuietDelay < 0 {
+		return fmt.Errorf("quiet delay must not be negative, got %s", c.QuietDelay)
 	}
 	if _, err := gpu.ParseBackendKind(string(c.Backend)); err != nil {
 		return err

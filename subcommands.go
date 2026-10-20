@@ -92,6 +92,8 @@ func cmdRun(args []string) int {
 		AutoDelay:         cfg.AutoDelay,
 		QuietThresholdPct: cfg.QuietThresholdPct,
 		QuietHold:         cfg.QuietHold,
+		QuietTempC:        cfg.QuietTempC,
+		QuietDelay:        cfg.QuietDelay,
 		Curve:             cfg.Curve,
 	}, backend.Reader, backend.Setter)
 	daemon.PollInterval = cfg.PollInterval
@@ -106,7 +108,8 @@ func cmdRun(args []string) int {
 		"poll_interval", cfg.PollInterval.String(),
 		"power_threshold_w", cfg.PowerThresholdW, "deadband_pct", cfg.DeadbandPct,
 		"write_pause", cfg.WritePause.String(), "auto_delay", cfg.AutoDelay.String(),
-		"quiet_threshold_pct", cfg.QuietThresholdPct, "quiet_hold", cfg.QuietHold.String())
+		"quiet_threshold_pct", cfg.QuietThresholdPct, "quiet_hold", cfg.QuietHold.String(),
+		"quiet_temp_c", cfg.QuietTempC, "quiet_delay", cfg.QuietDelay.String())
 	err = daemon.Run(ctx)
 	switch {
 	case err == nil:

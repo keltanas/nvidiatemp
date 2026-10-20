@@ -26,6 +26,8 @@ func curveOutput(cfg *config.Config) string {
 	fmt.Fprintf(&b, "auto delay:       %s\n", cfg.AutoDelay)
 	fmt.Fprintf(&b, "quiet threshold:  %s%%\n", fmtNum(cfg.QuietThresholdPct))
 	fmt.Fprintf(&b, "quiet hold:       %s\n", cfg.QuietHold)
+	fmt.Fprintf(&b, "quiet temp:       %s°C\n", fmtNum(cfg.QuietTempC))
+	fmt.Fprintf(&b, "quiet delay:      %s\n", cfg.QuietDelay)
 	fmt.Fprintf(&b, "backend:          %s\n", cfg.Backend)
 
 	b.WriteString("\ndefault curve:\n")

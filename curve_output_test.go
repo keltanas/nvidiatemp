@@ -65,6 +65,8 @@ func TestCurveOutputDefaults(t *testing.T) {
 		"write pause:      5s",
 		"power threshold:  50 W",
 		"auto delay:       5m0s",
+		"quiet temp:       50°C",
+		"quiet delay:      1m0s",
 		"backend:          auto",
 		"default curve:",
 		"50°C → 30%",

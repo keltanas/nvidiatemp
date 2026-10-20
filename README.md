@@ -19,13 +19,19 @@ driver when idle.
   auto happens if no load appears in the meantime: any violation of the
   conditions (power above the threshold again, or temperature above the lower
   bound) cancels the cooldown and control follows the curve again.
-- If the driver spins the fan up on its own while the GPU is in auto mode
-  (speed ≥ `quiet_threshold`, default 30%) and the card is neither loaded
-  (power below the threshold) nor hot (temperature below the curve's lower
-  bound), the card is taken into manual mode at the curve speed (30% when
-  idle) for `quiet_hold` (default 3 minutes), then handed back to the driver.
-  Load or heat arriving sooner ends the hold early and normal curve control
-  continues. `quiet_hold: 0` disables the interception.
+- Quiet hold: an idle card (power below the threshold) is taken into manual
+  mode for `quiet_hold` (default 3 minutes) and then handed back to the driver
+  by either of two triggers:
+  - the driver spins the fan up on its own (speed ≥ `quiet_threshold`, default
+    30%) while the card is not hot (temperature below the curve's lower
+    bound);
+  - the card stays at or above `quiet_temp` (default 50°C) continuously for
+    `quiet_delay` (default 1 minute) — a slow idle warm-up, when the fan may
+    still be low on its own.
+  The speed follows the curve during the hold (30% at the lower bound). Load
+  arriving sooner ends the hold early; a fan-triggered hold also ends early
+  when the card heats above the lower bound. `quiet_hold: 0` disables both
+  triggers.
 - Anti-flapping: a speed is written only when it differs from the current one
   by at least the deadband (default 5%) and no more often than once per
   `write_pause` (default 5s); mode switches are subject to the same pause.
@@ -95,10 +101,12 @@ Format and defaults are documented in the comments of
 [`deploy/nvidiatemp.example.yaml`](deploy/nvidiatemp.example.yaml). Without a
 file, built-in defaults apply: curve `50→30, 60→40, 65→45, 70→55, 75→60,
 80→70`, interval 2s, deadband 5%, pause 5s, power threshold 50W, auto-cooldown
-5 minutes, quiet interception at 30% for 3 minutes, backend `auto`. The config
+5 minutes, quiet interception at 30% for 3 minutes (also when an idle card
+stays at 50°C for a minute), backend `auto`. The config
 is validated at startup (curve
 temperatures strictly increasing, speeds within [30, 100], power threshold > 0,
-quiet threshold within (0, 100] when enabled, backend known) — on error the
+quiet threshold within (0, 100], quiet temperature > 0 and quiet delay ≥ 0 when
+enabled, backend known) — on error the
 process exits with code 1 before the loop starts.
 
 ## Manual return to auto mode

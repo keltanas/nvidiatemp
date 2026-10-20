@@ -44,6 +44,27 @@ func TestValidateRejectsBadQuietHold(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("disabled quiet hold must not validate the threshold: %v", err)
 	}
+	// The temperature trigger parameters are validated when the hold is on.
+	for _, temp := range []float64{0, -10} {
+		cfg := Default()
+		cfg.QuietTempC = temp
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "quiet temperature") {
+			t.Errorf("quiet temperature %v accepted: %v", temp, err)
+		}
+	}
+	cfg = Default()
+	cfg.QuietDelay = -time.Second
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "quiet delay") {
+		t.Errorf("negative quiet delay accepted: %v", err)
+	}
+	// Disabled feature: the temperature parameters are not checked either.
+	cfg = Default()
+	cfg.QuietHold = 0
+	cfg.QuietTempC = 0
+	cfg.QuietDelay = -time.Second
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("disabled quiet hold must not validate the temperature trigger: %v", err)
+	}
 }
 
 func TestValidateRejectsBadCommonCurve(t *testing.T) {
