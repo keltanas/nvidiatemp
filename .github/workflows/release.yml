@@ -43,7 +43,7 @@ jobs:
           mkdir -p dist
           tar -czf "dist/nvidiatemp-linux-${{ matrix.arch }}.tar.gz" \
             "nvidiatemp-linux-${{ matrix.arch }}" \
-            LICENSE README.md README_RU.md \
+            LICENSE README.md README_RU.md README_ZH.md \
             deploy/nvidiatemp.example.yaml deploy/nvidiatemp.service
 
       - uses: actions/upload-artifact@v4
